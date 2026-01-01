@@ -200,9 +200,93 @@ From `check_log.mlir`, the transformation for `reduce_dispatch_0_reduction_8x64_
 
 | Pass | Key IR State |
 |------|--------------|
-| After GenericVectorizationPass | `vector.multi_reduction <add>, %14, %cst_1 [0] : vector<64xf32> to f32` |
-| After layout annotation | `iree_vector_ext.to_layout ... nested_layout<thread_tile=[64]>` |
+| After LLVMGPUConfigureTensorLayoutsPass | `linalg.reduce` with `iree_vector_ext.to_layout` on `tensor<1x64xf32>` with `thread_tile=[1,64]` |
+| After LinalgGeneralizeNamedOpsPass | `linalg.reduce` → `linalg.generic` with `iterator_types = ["reduction"]` |
+| After FoldUnitExtentDimsPass | `tensor<1x64xf32>` → `tensor<64xf32>`, layouts updated to 1D |
+| After VectorizeIREEVectorExtOpsPass | `iree_vector_ext.to_layout` now on `vector<64xf32>`, reduction still `linalg.generic` |
+| After GenericVectorizationPass | `linalg.generic` → `vector.multi_reduction <add>, %14, %cst_1 [0] : vector<64xf32> to f32` |
 | After LLVMGPUVectorDistributePass | Each thread reads `vector<1xf32>`, local reduction to `f32`, then `gpu.subgroup_reduce add cluster(size=64)` |
+
+---
+
+## GenericVectorizationPass Details
+
+The `GenericVectorizationPass` (`iree-codegen-generic-vectorization`) is responsible for converting `linalg.generic` operations into their vector equivalents. This pass runs after layout annotations have been attached via `iree_vector_ext.to_layout`.
+
+### What GenericVectorizationPass Does
+
+1. **Converts linalg.generic to vector operations**: Transforms tensor-based linalg ops into vector dialect operations
+2. **Handles to_layout ops on tensors**: Vectorizes the `iree_vector_ext.to_layout` operations
+3. **Creates vector.multi_reduction**: Converts reduction iterator types into `vector.multi_reduction` operations
+
+### Transformation Example from check_log.mlir
+
+**Before GenericVectorizationPass** (after VectorizeIREEVectorExtOpsPass):
+```mlir
+// The to_layout ops are already on vectors after VectorizeIREEVectorExtOpsPass
+%12 = vector.transfer_read %extracted_slice_1[%c0], %0 {in_bounds = [true]} : tensor<64xf32>, vector<64xf32>
+%13 = iree_vector_ext.to_layout %12 to layout(#iree_vector_ext.nested_layout<
+    subgroup_tile = [1], batch_tile = [1], outer_tile = [1],
+    thread_tile = [64], element_tile = [1],
+    subgroup_strides = [0], thread_strides = [1]>) : vector<64xf32>
+
+// The reduction is still a linalg.generic
+%25 = linalg.generic {
+    indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
+    iterator_types = ["reduction"]
+} ins(%24 : tensor<64xf32>) outs(%9 : tensor<f32>) {
+^bb0(%in: f32, %out: f32):
+    %26 = arith.addf %in, %out : f32
+    linalg.yield %26 : f32
+} -> tensor<f32>
+```
+
+**After GenericVectorizationPass**:
+```mlir
+// All linalg.generic ops are now vectorized
+%10 = vector.transfer_read %extracted_slice_2[%c0], %0 {in_bounds = [true]} : tensor<64xf32>, vector<64xf32>
+%11 = iree_vector_ext.to_layout %10 to layout(#iree_vector_ext.nested_layout<
+    subgroup_tile = [1], batch_tile = [1], outer_tile = [1],
+    thread_tile = [64], element_tile = [1],
+    subgroup_strides = [0], thread_strides = [1]>) : vector<64xf32>
+
+// Element-wise add is now arith.addf on vectors
+%13 = arith.addf %11, %12 : vector<64xf32>
+
+%14 = iree_vector_ext.to_layout %13 to layout(...)
+
+// Reduction is now vector.multi_reduction
+%15 = vector.multi_reduction <add>, %14, %cst_1 [0] : vector<64xf32> to f32
+%16 = vector.broadcast %15 : f32 to vector<f32>
+%17 = vector.transfer_write %16, %9[] : vector<f32>, tensor<f32>
+```
+
+### Key Observations
+
+1. **Tensor to Vector**: `linalg.generic` ops operating on tensors become vector operations with `vector.transfer_read`/`vector.transfer_write` for I/O
+
+2. **Layout Preservation**: The `iree_vector_ext.to_layout` annotations are preserved and now operate on vector types instead of tensor types
+
+3. **Reduction Conversion**: The reduction `linalg.generic` with `iterator_types = ["reduction"]` becomes `vector.multi_reduction <add>, ..., [0]`
+
+4. **Accumulator Handling**: The initial reduction value (`%cst_1 = -0.000000e+00 : f32`) is passed as the accumulator to `vector.multi_reduction`
+
+### Pipeline Position
+
+```
+LLVMGPUConfigureTensorLayoutsPass
+    ↓ (adds iree_vector_ext.to_layout on tensors)
+LinalgGeneralizeNamedOpsPass
+    ↓ (converts linalg.reduce to linalg.generic)
+FoldUnitExtentDimsPass
+    ↓ (folds unit dims: tensor<1x64xf32> → tensor<64xf32>)
+VectorizeIREEVectorExtOpsPass
+    ↓ (vectorizes iree_vector_ext.to_layout on tensors)
+GenericVectorizationPass  ← HERE
+    ↓ (vectorizes remaining linalg.generic ops)
+LLVMGPUVectorDistributePass
+    ↓ (distributes vectors across threads using layout info)
+```
 
 ---
 
