@@ -105,13 +105,13 @@ The `DistributeMultiReduction` pattern (in `GPUNestedLayoutDistributionPatterns.
 
 ## Key Implementation Files
 
-| File | Purpose |
-|------|---------|
-| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUNestedLayoutDistributionPatterns.cpp` | `DistributeMultiReduction` pattern (lines 966-1395) |
-| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.cpp` | Core distribution framework and worklist-based pattern application |
-| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.h` | `DistributionPattern` base class definitions |
-| `compiler/src/iree/compiler/Codegen/Utils/GPUUtils.cpp` | `warpReduction()` (lines 427-500), `emitGPUGroupReduction()` (lines 589-656) |
-| `compiler/src/iree/compiler/Codegen/LLVMGPU/LLVMGPUVectorDistribute.cpp` | LLVM GPU specific pass entry point |
+| File                                                                                    | Purpose                                                                      |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUNestedLayoutDistributionPatterns.cpp` | `DistributeMultiReduction` pattern (lines 966-1395)                          |
+| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.cpp`               | Core distribution framework and worklist-based pattern application           |
+| `compiler/src/iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.h`                 | `DistributionPattern` base class definitions                                 |
+| `compiler/src/iree/compiler/Codegen/Utils/GPUUtils.cpp`                                 | `warpReduction()` (lines 427-500), `emitGPUGroupReduction()` (lines 589-656) |
+| `compiler/src/iree/compiler/Codegen/LLVMGPU/LLVMGPUVectorDistribute.cpp`                | LLVM GPU specific pass entry point                                           |
 
 ---
 
@@ -135,25 +135,25 @@ For a 64-thread reduction, this performs 6 iterations with strides: 1, 2, 4, 8, 
 
 From `GPUUtils.cpp:562-586`, the following `vector::CombiningKind` operations are supported:
 
-| Category | Operations |
-|----------|------------|
-| Arithmetic | `ADD`, `MUL` |
-| Integer Comparison | `MINUI`, `MINSI`, `MAXUI`, `MAXSI` |
-| Float Comparison | `MINUMF`, `MAXNUMF`, `MINIMUMF`, `MAXIMUMF` |
-| Bitwise | `AND`, `OR`, `XOR` |
+| Category           | Operations                                  |
+| ------------------ | ------------------------------------------- |
+| Arithmetic         | `ADD`, `MUL`                                |
+| Integer Comparison | `MINUI`, `MINSI`, `MAXUI`, `MAXSI`          |
+| Float Comparison   | `MINUMF`, `MAXNUMF`, `MINIMUMF`, `MAXIMUMF` |
+| Bitwise            | `AND`, `OR`, `XOR`                          |
 
 ### Identity Values (from `GPUUtils.cpp:504-541`)
 
-| Operation | Identity Value |
-|-----------|----------------|
-| ADD | 0 |
-| MUL | 1 |
-| MINUI/MINSI | INT_MAX |
-| MAXUI/MAXSI | INT_MIN |
-| MINIMUMF/MINNUMF | +∞ |
-| MAXIMUMF/MAXNUMF | -∞ |
-| AND | all bits set (1) |
-| OR, XOR | 0 |
+| Operation        | Identity Value   |
+| ---------------- | ---------------- |
+| ADD              | 0                |
+| MUL              | 1                |
+| MINUI/MINSI      | INT_MAX          |
+| MAXUI/MAXSI      | INT_MIN          |
+| MINIMUMF/MINNUMF | +∞               |
+| MAXIMUMF/MAXNUMF | -∞               |
+| AND              | all bits set (1) |
+| OR, XOR          | 0                |
 
 ---
 
@@ -198,14 +198,14 @@ Input: vector.multi_reduction <kind>, src, acc [dims]
 
 From `check_log.mlir`, the transformation for `reduce_dispatch_0_reduction_8x64_f32`:
 
-| Pass | Key IR State |
-|------|--------------|
-| After LLVMGPUConfigureTensorLayoutsPass | `linalg.reduce` with `iree_vector_ext.to_layout` on `tensor<1x64xf32>` with `thread_tile=[1,64]` |
-| After LinalgGeneralizeNamedOpsPass | `linalg.reduce` → `linalg.generic` with `iterator_types = ["reduction"]` |
-| After FoldUnitExtentDimsPass | `tensor<1x64xf32>` → `tensor<64xf32>`, layouts updated to 1D |
-| After VectorizeIREEVectorExtOpsPass | `iree_vector_ext.to_layout` now on `vector<64xf32>`, reduction still `linalg.generic` |
-| After GenericVectorizationPass | `linalg.generic` → `vector.multi_reduction <add>, %14, %cst_1 [0] : vector<64xf32> to f32` |
-| After LLVMGPUVectorDistributePass | Each thread reads `vector<1xf32>`, local reduction to `f32`, then `gpu.subgroup_reduce add cluster(size=64)` |
+| Pass                                    | Key IR State                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| After LLVMGPUConfigureTensorLayoutsPass | `linalg.reduce` with `iree_vector_ext.to_layout` on `tensor<1x64xf32>` with `thread_tile=[1,64]`             |
+| After LinalgGeneralizeNamedOpsPass      | `linalg.reduce` → `linalg.generic` with `iterator_types = ["reduction"]`                                     |
+| After FoldUnitExtentDimsPass            | `tensor<1x64xf32>` → `tensor<64xf32>`, layouts updated to 1D                                                 |
+| After VectorizeIREEVectorExtOpsPass     | `iree_vector_ext.to_layout` now on `vector<64xf32>`, reduction still `linalg.generic`                        |
+| After GenericVectorizationPass          | `linalg.generic` → `vector.multi_reduction <add>, %14, %cst_1 [0] : vector<64xf32> to f32`                   |
+| After LLVMGPUVectorDistributePass       | Each thread reads `vector<1xf32>`, local reduction to `f32`, then `gpu.subgroup_reduce add cluster(size=64)` |
 
 ---
 
